@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>关系互动分析器 V0</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <h1>关系互动分析器 V0</h1>
+        <p>本地导入聊天记录，查看基础互动统计和趋势。</p>
+      </div>
+      <div class="privacy-badge">本地内存处理</div>
+    </header>
+
+    <main class="app-shell">
+      <section class="panel upload-panel">
+        <div class="section-title">
+          <h2>导入聊天记录</h2>
+          <span>支持 TXT / CSV</span>
+        </div>
+        <form id="upload-form" class="upload-form">
+          <label class="file-picker">
+            <input id="chat-file" type="file" accept=".txt,.csv,text/plain,text/csv" />
+            <span id="file-label">选择聊天记录文件</span>
+          </label>
+          <button id="upload-button" type="submit">解析文件</button>
+        </form>
+        <p class="hint">TXT 示例：<code>[2026-05-22 20:30] Alice: 你好</code> 或 <code>Alice: 你好</code></p>
+        <div id="status" class="status" role="status"></div>
+      </section>
+
+      <section id="identity-panel" class="panel hidden">
+        <div class="section-title">
+          <h2>选择身份</h2>
+          <span id="sender-count"></span>
+        </div>
+        <div id="sender-options" class="segmented"></div>
+        <p id="identity-warning" class="warning hidden"></p>
+      </section>
+
+      <section id="summary-panel" class="summary-grid hidden"></section>
+
+      <section id="charts-panel" class="chart-grid hidden">
+        <article class="panel chart-panel">
+          <div class="section-title">
+            <h2>每日消息量</h2>
+            <span>按日期统计</span>
+          </div>
+          <canvas id="daily-chart" height="220"></canvas>
+        </article>
+        <article class="panel chart-panel">
+          <div class="section-title">
+            <h2>双方消息数</h2>
+            <span>按身份对比</span>
+          </div>
+          <canvas id="role-chart" height="220"></canvas>
+        </article>
+        <article class="panel chart-panel wide">
+          <div class="section-title">
+            <h2>回复间隔趋势</h2>
+            <span>发送者切换时计算</span>
+          </div>
+          <canvas id="reply-chart" height="240"></canvas>
+        </article>
+      </section>
+
+      <section id="messages-panel" class="panel hidden">
+        <div class="section-title">
+          <h2>消息预览</h2>
+          <span id="message-count"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>发送者</th>
+                <th>身份</th>
+                <th>内容</th>
+              </tr>
+            </thead>
+            <tbody id="messages-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="errors-panel" class="panel hidden">
+        <div class="section-title">
+          <h2>解析提示</h2>
+          <span id="error-count"></span>
+        </div>
+        <div id="errors-list" class="errors-list"></div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
