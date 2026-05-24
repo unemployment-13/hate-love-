@@ -1,6 +1,19 @@
 import unittest
+from unittest.mock import patch
 
-from app import assign_self_sender, compute_metrics, parse_csv_content, parse_txt
+from app import (
+    assign_self_sender,
+    compute_metrics,
+    export_csv,
+    export_txt,
+    generate_report,
+    import_file,
+    import_screenshots,
+    parse_csv_content,
+    parse_html_content,
+    parse_json_content,
+    parse_txt,
+)
 
 
 class ParserTests(unittest.TestCase):
@@ -36,6 +49,46 @@ class ParserTests(unittest.TestCase):
 
         self.assertEqual(len(messages), 1)
         self.assertEqual(len(errors), 1)
+
+    def test_json_export_import(self):
+        content = '{"messages":[{"timestamp":"2026-05-22 20:30","sender":"Alice","text":"你好"}]}'
+        messages, errors = parse_json_content(content)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0].source, "json_export")
+
+    def test_html_export_import(self):
+        content = "<html><body><p>[2026-05-22 20:30] Alice: 你好</p><p>Bob: 收到</p></body></html>"
+        messages, errors = parse_html_content(content)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(messages), 2)
+
+    def test_file_import_supports_manual_csv_mapping(self):
+        content = "when,who,body\n2026-05-22 20:30,Alice,你好\n"
+        result = import_file(
+            "export.csv",
+            content.encode("utf-8"),
+            mapping={"time_field": "when", "sender_field": "who", "text_field": "body"},
+        )
+
+        self.assertEqual(len(result.messages), 1)
+        self.assertEqual(result.messages[0].sender, "Alice")
+
+    def test_screenshot_import_uses_ocr_blocks(self):
+        blocks = [
+            {"image": "a.jpg", "image_index": 1, "text": "4月30日 上午10:29", "confidence": 0.98, "x": 0.42, "y": 0.8, "width": 0.16, "height": 0.03},
+            {"image": "a.jpg", "image_index": 1, "text": "你好", "confidence": 0.91, "x": 0.72, "y": 0.7, "width": 0.1, "height": 0.04},
+            {"image": "a.jpg", "image_index": 1, "text": "收到", "confidence": 0.88, "x": 0.12, "y": 0.6, "width": 0.12, "height": 0.04},
+        ]
+        with patch("app.run_vision_ocr", return_value=(blocks, [])):
+            result = import_screenshots([("a.jpg", b"fake")])
+
+        self.assertEqual(len(result.messages), 2)
+        self.assertEqual(result.messages[0].sender, "我")
+        self.assertEqual(result.messages[1].sender, "对方")
+        self.assertEqual(result.messages[0].timestamp, "2026-04-30T10:29:00")
 
 
 class DataAndMetricTests(unittest.TestCase):
@@ -79,6 +132,28 @@ class DataAndMetricTests(unittest.TestCase):
         self.assertEqual(metrics["untimed_message_count"], 2)
         self.assertEqual(metrics["daily_message_counts"], [])
         self.assertEqual(metrics["conversation_starts"], 0)
+
+    def test_report_and_exports(self):
+        messages, _ = parse_txt(
+            "\n".join(
+                [
+                    "[2026-05-22 08:00] Alice: 早，今天有空一起吃饭吗",
+                    "[2026-05-22 08:05] Bob: 可以呀，我晚上有空",
+                    "[2026-05-22 08:08] Alice: 那我订位置",
+                    "[2026-05-22 08:10] Bob: 好，我等你消息",
+                ]
+            )
+        )
+        assign_self_sender(messages, "Alice")
+
+        report = generate_report(messages)
+        txt = export_txt(messages)
+        csv_text = export_csv(messages)
+
+        self.assertIn("scores", report)
+        self.assertIn("claims", report)
+        self.assertIn("[2026-05-22 08:00:00] Alice", txt)
+        self.assertIn("sender_role", csv_text)
 
 
 if __name__ == "__main__":

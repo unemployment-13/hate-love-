@@ -3,96 +3,149 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>关系互动分析器 V0</title>
+    <title>关系互动分析器 V1</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <header class="app-header">
       <div>
-        <h1>关系互动分析器 V0</h1>
-        <p>本地导入聊天记录，查看基础互动统计和趋势。</p>
+        <h1>关系互动分析器 V1</h1>
+        <p>截图 OCR / 第三方导出文件导入，校对后生成关系互动趋势报告。</p>
       </div>
-      <div class="privacy-badge">本地内存处理</div>
+      <div class="privacy-badge">默认本地处理</div>
     </header>
 
     <main class="app-shell">
-      <section class="panel upload-panel">
-        <div class="section-title">
-          <h2>导入聊天记录</h2>
-          <span>支持 TXT / CSV</span>
-        </div>
-        <form id="upload-form" class="upload-form">
-          <label class="file-picker">
-            <input id="chat-file" type="file" accept=".txt,.csv,text/plain,text/csv" />
-            <span id="file-label">选择聊天记录文件</span>
-          </label>
-          <button id="upload-button" type="submit">解析文件</button>
-        </form>
-        <p class="hint">TXT 示例：<code>[2026-05-22 20:30] Alice: 你好</code> 或 <code>Alice: 你好</code></p>
-        <div id="status" class="status" role="status"></div>
-      </section>
-
-      <section id="identity-panel" class="panel hidden">
-        <div class="section-title">
-          <h2>选择身份</h2>
-          <span id="sender-count"></span>
-        </div>
-        <div id="sender-options" class="segmented"></div>
-        <p id="identity-warning" class="warning hidden"></p>
-      </section>
-
-      <section id="summary-panel" class="summary-grid hidden"></section>
-
-      <section id="charts-panel" class="chart-grid hidden">
-        <article class="panel chart-panel">
+      <aside class="side-panel">
+        <section class="panel">
           <div class="section-title">
-            <h2>每日消息量</h2>
-            <span>按日期统计</span>
+            <h2>导入中心</h2>
+            <span>微信优先</span>
           </div>
-          <canvas id="daily-chart" height="220"></canvas>
-        </article>
-        <article class="panel chart-panel">
-          <div class="section-title">
-            <h2>双方消息数</h2>
-            <span>按身份对比</span>
+          <div class="tabs" role="tablist">
+            <button class="tab active" type="button" data-tab="screenshots">截图 OCR</button>
+            <button class="tab" type="button" data-tab="files">导出文件</button>
           </div>
-          <canvas id="role-chart" height="220"></canvas>
-        </article>
-        <article class="panel chart-panel wide">
-          <div class="section-title">
-            <h2>回复间隔趋势</h2>
-            <span>发送者切换时计算</span>
-          </div>
-          <canvas id="reply-chart" height="240"></canvas>
-        </article>
-      </section>
 
-      <section id="messages-panel" class="panel hidden">
-        <div class="section-title">
-          <h2>消息预览</h2>
-          <span id="message-count"></span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>发送者</th>
-                <th>身份</th>
-                <th>内容</th>
-              </tr>
-            </thead>
-            <tbody id="messages-body"></tbody>
-          </table>
-        </div>
-      </section>
+          <form id="screenshot-form" class="import-form">
+            <label class="file-picker">
+              <input id="screenshot-files" type="file" accept=".png,.jpg,.jpeg,.webp,.heic,.tif,.tiff,image/*" multiple />
+              <span id="screenshot-label">选择一张或多张聊天截图</span>
+            </label>
+            <p class="hint">按上传顺序识别。长截图可直接上传，多截图建议先按时间排序选择。</p>
+            <button id="screenshot-button" type="submit">识别截图</button>
+          </form>
 
-      <section id="errors-panel" class="panel hidden">
-        <div class="section-title">
-          <h2>解析提示</h2>
-          <span id="error-count"></span>
-        </div>
-        <div id="errors-list" class="errors-list"></div>
+          <form id="file-form" class="import-form hidden">
+            <label class="file-picker">
+              <input id="chat-file" type="file" accept=".txt,.csv,.json,.html,.htm,text/plain,text/csv,application/json,text/html" />
+              <span id="file-label">选择第三方导出文件</span>
+            </label>
+            <div class="mapping-grid">
+              <label>时间列<input id="time-field" placeholder="可选，如 timestamp" /></label>
+              <label>发送者列<input id="sender-field" placeholder="可选，如 sender" /></label>
+              <label>内容列<input id="text-field" placeholder="可选，如 text" /></label>
+            </div>
+            <p class="hint">支持 CSV / JSON / HTML / TXT。CSV 字段不标准时可手动填写列名。</p>
+            <button id="file-button" type="submit">导入文件</button>
+          </form>
+
+          <div id="status" class="status" role="status"></div>
+        </section>
+
+        <section id="identity-panel" class="panel hidden">
+          <div class="section-title">
+            <h2>身份设置</h2>
+            <span id="sender-count"></span>
+          </div>
+          <div id="sender-options" class="segmented"></div>
+          <p id="identity-warning" class="warning hidden"></p>
+        </section>
+
+        <section id="export-panel" class="panel hidden">
+          <div class="section-title">
+            <h2>导出</h2>
+            <span>标准化数据</span>
+          </div>
+          <div class="export-actions">
+            <a id="export-txt" class="button-link" href="#">TXT</a>
+            <a id="export-csv" class="button-link" href="#">CSV</a>
+            <a id="export-html" class="button-link" href="#">HTML 报告</a>
+          </div>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <section id="summary-panel" class="summary-grid hidden"></section>
+
+        <section id="report-panel" class="panel hidden">
+          <div class="section-title">
+            <h2>关系趋势报告</h2>
+            <span id="report-confidence"></span>
+          </div>
+          <div id="report-overview" class="report-overview"></div>
+          <div id="report-claims" class="claim-grid"></div>
+        </section>
+
+        <section id="review-panel" class="panel hidden">
+          <div class="section-title">
+            <h2>校对消息</h2>
+            <span id="message-count"></span>
+          </div>
+          <div class="review-toolbar">
+            <button id="save-messages" type="button">保存校对</button>
+            <button id="delete-selected" type="button" class="secondary">删除选中</button>
+            <button id="merge-selected" type="button" class="secondary">合并选中</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th class="select-col">选</th>
+                  <th>时间</th>
+                  <th>发送者</th>
+                  <th>身份</th>
+                  <th>类型</th>
+                  <th>内容</th>
+                  <th>置信度</th>
+                </tr>
+              </thead>
+              <tbody id="messages-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="charts-panel" class="chart-grid hidden">
+          <article class="panel chart-panel">
+            <div class="section-title">
+              <h2>每日消息量</h2>
+              <span>按日期统计</span>
+            </div>
+            <canvas id="daily-chart" height="220"></canvas>
+          </article>
+          <article class="panel chart-panel">
+            <div class="section-title">
+              <h2>双方消息数</h2>
+              <span>按身份对比</span>
+            </div>
+            <canvas id="role-chart" height="220"></canvas>
+          </article>
+          <article class="panel chart-panel wide">
+            <div class="section-title">
+              <h2>回复间隔趋势</h2>
+              <span>发送者切换时计算</span>
+            </div>
+            <canvas id="reply-chart" height="240"></canvas>
+          </article>
+        </section>
+
+        <section id="issues-panel" class="panel hidden">
+          <div class="section-title">
+            <h2>解析提示</h2>
+            <span id="issue-count"></span>
+          </div>
+          <div id="issues-list" class="issues-list"></div>
+        </section>
       </section>
     </main>
 
