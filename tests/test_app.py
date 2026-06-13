@@ -1,4 +1,7 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from app import (
@@ -9,11 +12,15 @@ from app import (
     generate_report,
     import_file,
     import_screenshots,
+    import_wechat_records,
     parse_csv_content,
+    parse_datetime,
     parse_html_content,
     parse_json_content,
     parse_txt,
 )
+from wechat.collector import export_messages, list_sessions
+from wechat.detector import detect_wechat, find_accounts
 
 
 class ParserTests(unittest.TestCase):
@@ -154,6 +161,93 @@ class DataAndMetricTests(unittest.TestCase):
         self.assertIn("claims", report)
         self.assertIn("[2026-05-22 08:00:00] Alice", txt)
         self.assertIn("sender_role", csv_text)
+
+
+class WeChatV2Tests(unittest.TestCase):
+    def test_wechat_detector_finds_account_dirs(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as temp_dir:
+            root = Path(temp_dir) / "xwechat_files"
+            account = root / "wxid_demo_1234"
+            (account / "db_storage").mkdir(parents=True)
+
+            accounts = find_accounts(root)
+            detection = detect_wechat(str(root))
+
+        self.assertEqual(len(accounts), 1)
+        self.assertTrue(detection["success"])
+        self.assertEqual(detection["accounts"][0]["account_name"], "wxid_demo_1234")
+
+    def test_wechat_sidecar_fixture_lists_sessions_and_messages(self):
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as temp_dir:
+            account = Path(temp_dir) / "wxid_demo_1234"
+            (account / "db_storage").mkdir(parents=True)
+            fixture = {
+                "sessions": [
+                    {
+                        "session_id": "wxid_friend",
+                        "display_name": "Alice",
+                        "message_count": 2,
+                        "last_timestamp": 1738713660,
+                    }
+                ],
+                "messages": {
+                    "wxid_friend": [
+                        {
+                            "id": "wx_1",
+                            "session_id": "wxid_friend",
+                            "sender": "我",
+                            "is_self": True,
+                            "timestamp": 1738713600,
+                            "raw_type": 1,
+                            "content": "你好",
+                        }
+                    ]
+                },
+            }
+            (account / "wechat_reader_fixture.json").write_text(json.dumps(fixture), encoding="utf-8")
+
+            sessions = list_sessions(str(account), "manual-key")
+            messages = export_messages(str(account), "manual-key", "wxid_friend")
+
+        self.assertEqual(sessions[0]["display_name"], "Alice")
+        self.assertEqual(messages[0]["content"], "你好")
+
+    def test_wechat_records_normalize_to_project_messages(self):
+        result = import_wechat_records(
+            [
+                {
+                    "id": "wx_1",
+                    "session_id": "wxid_friend",
+                    "sender": "我",
+                    "is_self": True,
+                    "timestamp": 1738713600,
+                    "raw_type": 1,
+                    "content": "你好",
+                },
+                {
+                    "id": "wx_2",
+                    "session_id": "wxid_friend",
+                    "sender": "Alice",
+                    "is_self": False,
+                    "timestamp": 1738713660,
+                    "raw_type": 34,
+                    "content": "",
+                },
+            ]
+        )
+
+        self.assertEqual(len(result.messages), 2)
+        self.assertEqual(result.messages[0].sender_role, "self")
+        self.assertEqual(result.messages[1].sender_role, "other")
+        self.assertEqual(result.messages[1].message_type, "voice")
+        self.assertEqual(result.messages[1].text, "[语音消息]")
+        self.assertEqual(result.messages[0].source, "wechat_local")
+
+    def test_parse_datetime_accepts_unix_timestamp(self):
+        parsed = parse_datetime("1738713600")
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.year, 2025)
 
 
 if __name__ == "__main__":

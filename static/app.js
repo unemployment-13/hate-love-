@@ -7,10 +7,24 @@ const state = {
   metrics: null,
   report: null,
   selectedSender: null,
+  wechatAccounts: [],
+  selectedWechatAccountId: null,
+  wechatSessions: [],
+  selectedWechatSessionId: null,
 };
 
 const els = {
   tabs: document.querySelectorAll(".tab"),
+  wechatForm: document.querySelector("#wechat-form"),
+  wechatRoot: document.querySelector("#wechat-root"),
+  wechatDetectButton: document.querySelector("#wechat-detect-button"),
+  wechatDetectResult: document.querySelector("#wechat-detect-result"),
+  wechatAccountOptions: document.querySelector("#wechat-account-options"),
+  wechatDbKey: document.querySelector("#wechat-db-key"),
+  wechatSessionButton: document.querySelector("#wechat-session-button"),
+  wechatSessionOptions: document.querySelector("#wechat-session-options"),
+  wechatLimit: document.querySelector("#wechat-limit"),
+  wechatImportButton: document.querySelector("#wechat-import-button"),
   screenshotForm: document.querySelector("#screenshot-form"),
   screenshotFiles: document.querySelector("#screenshot-files"),
   screenshotLabel: document.querySelector("#screenshot-label"),
@@ -56,10 +70,15 @@ els.tabs.forEach((tab) => {
     els.tabs.forEach((item) => item.classList.remove("active"));
     tab.classList.add("active");
     const active = tab.dataset.tab;
+    els.wechatForm.classList.toggle("hidden", active !== "wechat");
     els.screenshotForm.classList.toggle("hidden", active !== "screenshots");
     els.fileForm.classList.toggle("hidden", active !== "files");
   });
 });
+
+els.wechatDetectButton.addEventListener("click", detectWechatAccounts);
+els.wechatSessionButton.addEventListener("click", readWechatSessions);
+els.wechatForm.addEventListener("submit", importWechatSession);
 
 els.screenshotFiles.addEventListener("change", () => {
   const count = els.screenshotFiles.files.length;
@@ -101,6 +120,162 @@ els.fileForm.addEventListener("submit", async (event) => {
 els.saveMessages.addEventListener("click", saveReviewEdits);
 els.deleteSelected.addEventListener("click", deleteSelectedMessages);
 els.mergeSelected.addEventListener("click", mergeSelectedMessages);
+
+async function detectWechatAccounts() {
+  setStatus("正在检测本机微信账号目录...");
+  els.wechatDetectButton.disabled = true;
+  const rootPath = els.wechatRoot.value.trim();
+  try {
+    const response = rootPath
+      ? await fetch("/api/wechat/accounts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ root_path: rootPath }),
+        })
+      : await fetch("/api/wechat/detect");
+    const data = await readJson(response);
+    state.wechatAccounts = data.accounts || [];
+    state.selectedWechatAccountId = state.wechatAccounts[0]?.account_id || null;
+    state.wechatSessions = [];
+    state.selectedWechatSessionId = null;
+    renderWechatDetection(data);
+    setStatus(state.wechatAccounts.length ? `检测到 ${state.wechatAccounts.length} 个微信账号目录。` : "未检测到微信账号目录。", !state.wechatAccounts.length);
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    els.wechatDetectButton.disabled = false;
+  }
+}
+
+function renderWechatDetection(data) {
+  const roots = data.roots || [];
+  const warnings = data.warnings || [];
+  els.wechatDetectResult.innerHTML = `
+    <div class="mini-list">
+      ${roots.map((root) => `<div>${root.exists ? "已找到" : "未找到"}：${escapeHtml(root.redacted_path)}</div>`).join("")}
+      ${warnings.map((item) => `<div class="warning-line">${escapeHtml(item.message || item.code)}</div>`).join("")}
+    </div>
+  `;
+  renderWechatAccounts();
+  renderWechatSessions();
+}
+
+function renderWechatAccounts() {
+  els.wechatAccountOptions.innerHTML = "";
+  state.wechatAccounts.forEach((account) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "account-card";
+    button.classList.toggle("active", account.account_id === state.selectedWechatAccountId);
+    button.innerHTML = `
+      <strong>${escapeHtml(account.display_name || account.account_name)}</strong>
+      <span>${escapeHtml(account.redacted_path)}</span>
+      <small>${account.has_db_storage ? "包含 db_storage" : "未发现 db_storage"} · ${account.has_file_storage ? "包含 FileStorage" : "未发现 FileStorage"}</small>
+    `;
+    button.addEventListener("click", () => {
+      state.selectedWechatAccountId = account.account_id;
+      state.wechatSessions = [];
+      state.selectedWechatSessionId = null;
+      renderWechatAccounts();
+      renderWechatSessions();
+    });
+    els.wechatAccountOptions.appendChild(button);
+  });
+}
+
+async function readWechatSessions() {
+  if (!state.selectedWechatAccountId) {
+    setStatus("请先检测并选择微信账号目录。", true);
+    return;
+  }
+  const dbKey = els.wechatDbKey.value.trim();
+  if (!dbKey) {
+    setStatus("请输入数据库密钥。V2.0 不自动获取密钥。", true);
+    return;
+  }
+  setStatus("正在通过 sidecar 读取微信会话列表...");
+  els.wechatSessionButton.disabled = true;
+  try {
+    const response = await fetch("/api/wechat/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_id: state.selectedWechatAccountId,
+        db_key: dbKey,
+        limit: 500,
+      }),
+    });
+    const data = await readJson(response);
+    state.wechatSessions = data.sessions || [];
+    state.selectedWechatSessionId = state.wechatSessions[0]?.session_id || null;
+    renderWechatSessions();
+    setStatus(state.wechatSessions.length ? `读取到 ${state.wechatSessions.length} 个会话。` : "没有读取到可用会话。", !state.wechatSessions.length);
+  } catch (error) {
+    renderWechatSessions();
+    setStatus(error.message, true);
+  } finally {
+    els.wechatSessionButton.disabled = false;
+  }
+}
+
+function renderWechatSessions() {
+  els.wechatSessionOptions.innerHTML = "";
+  state.wechatSessions.forEach((session) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "session-card";
+    button.classList.toggle("active", session.session_id === state.selectedWechatSessionId);
+    const lastTime = formatWechatSessionTime(session.last_timestamp || session.last_time || session.updated_at);
+    button.innerHTML = `
+      <strong>${escapeHtml(session.display_name || session.name || session.session_id)}</strong>
+      <span>${escapeHtml(session.session_id || "")}</span>
+      <small>${session.message_count ?? "未知"} 条 · ${escapeHtml(lastTime)}</small>
+    `;
+    button.addEventListener("click", () => {
+      state.selectedWechatSessionId = session.session_id;
+      renderWechatSessions();
+    });
+    els.wechatSessionOptions.appendChild(button);
+  });
+}
+
+async function importWechatSession(event) {
+  event.preventDefault();
+  if (!state.selectedWechatAccountId) {
+    setStatus("请先选择微信账号目录。", true);
+    return;
+  }
+  if (!state.selectedWechatSessionId) {
+    setStatus("请先读取并选择微信会话。", true);
+    return;
+  }
+  const dbKey = els.wechatDbKey.value.trim();
+  if (!dbKey) {
+    setStatus("请输入数据库密钥。", true);
+    return;
+  }
+  setStatus("正在导入微信会话消息...");
+  els.wechatImportButton.disabled = true;
+  try {
+    const response = await fetch("/api/wechat/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_id: state.selectedWechatAccountId,
+        db_key: dbKey,
+        session_id: state.selectedWechatSessionId,
+        limit: Number(els.wechatLimit.value || 5000),
+      }),
+    });
+    const data = await readJson(response);
+    loadConversationPayload(data);
+    setStatus(`微信导入完成：${data.message_count} 条消息。`);
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    els.wechatImportButton.disabled = false;
+  }
+}
 
 async function importConversation(url, formData, button, loadingText) {
   setStatus(loadingText);
@@ -230,7 +405,7 @@ function renderMessages() {
       </td>
       <td>
         <select class="cell-input message-type">
-          ${["text", "voice", "image", "system", "empty"].map((type) => `<option value="${type}" ${message.message_type === type ? "selected" : ""}>${typeName(type)}</option>`).join("")}
+          ${["text", "voice", "image", "video", "emoji", "file", "location", "system", "unknown", "empty"].map((type) => `<option value="${type}" ${message.message_type === type ? "selected" : ""}>${typeName(type)}</option>`).join("")}
         </select>
       </td>
       <td><textarea class="cell-text text">${escapeHtml(message.text)}</textarea></td>
@@ -547,12 +722,35 @@ function confidenceName(value) {
 }
 
 function typeName(value) {
-  return { text: "文本", voice: "语音", image: "图片/表情", system: "系统", empty: "空" }[value] || value;
+  return {
+    text: "文本",
+    voice: "语音",
+    image: "图片",
+    video: "视频",
+    emoji: "表情",
+    file: "文件",
+    location: "位置",
+    system: "系统",
+    unknown: "未知",
+    empty: "空",
+  }[value] || value;
 }
 
 function formatTime(value) {
   if (!value) return "";
   return value.replace("T", " ");
+}
+
+function formatWechatSessionTime(value) {
+  if (!value) return "无时间";
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    const date = new Date((numeric > 10000000000 ? numeric : numeric * 1000));
+    if (!Number.isNaN(date.getTime())) {
+      return formatTime(date.toISOString().slice(0, 19));
+    }
+  }
+  return formatTime(String(value));
 }
 
 function formatDuration(seconds) {

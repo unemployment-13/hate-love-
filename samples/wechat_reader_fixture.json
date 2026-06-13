@@ -1,0 +1,50 @@
+{
+  "sessions": [
+    {
+      "session_id": "wxid_friend_demo",
+      "display_name": "Alice",
+      "message_count": 4,
+      "last_timestamp": 1738713780
+    }
+  ],
+  "messages": {
+    "wxid_friend_demo": [
+      {
+        "id": "wx_0001",
+        "session_id": "wxid_friend_demo",
+        "sender": "我",
+        "is_self": true,
+        "timestamp": 1738713600,
+        "raw_type": 1,
+        "content": "今天有空一起吃饭吗"
+      },
+      {
+        "id": "wx_0002",
+        "session_id": "wxid_friend_demo",
+        "sender": "Alice",
+        "is_self": false,
+        "timestamp": 1738713660,
+        "raw_type": 1,
+        "content": "可以呀，晚上有空"
+      },
+      {
+        "id": "wx_0003",
+        "session_id": "wxid_friend_demo",
+        "sender": "我",
+        "is_self": true,
+        "timestamp": 1738713720,
+        "raw_type": 1,
+        "content": "那我订位置"
+      },
+      {
+        "id": "wx_0004",
+        "session_id": "wxid_friend_demo",
+        "sender": "Alice",
+        "is_self": false,
+        "timestamp": 1738713780,
+        "raw_type": 1,
+        "content": "好，我等你消息"
+      }
+    ]
+  }
+}

@@ -117,7 +117,7 @@ textarea {
 
 .tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 12px;
 }
@@ -192,6 +192,7 @@ button:disabled {
   gap: 8px;
 }
 
+.field-label,
 .mapping-grid label {
   display: grid;
   gap: 4px;
@@ -199,6 +200,7 @@ button:disabled {
   font-size: 13px;
 }
 
+.field-label input,
 .mapping-grid input,
 .cell-input,
 .cell-text {
@@ -208,6 +210,77 @@ button:disabled {
   padding: 8px;
   background: #ffffff;
   color: var(--text);
+}
+
+.wechat-result,
+.account-list,
+.session-list,
+.mini-list {
+  display: grid;
+  gap: 8px;
+}
+
+.wechat-result:empty,
+.account-list:empty,
+.session-list:empty {
+  display: none;
+}
+
+.mini-list {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfb;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.warning-line {
+  color: var(--red);
+}
+
+.account-card,
+.session-card {
+  min-height: 72px;
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  text-align: left;
+  color: var(--text);
+  background: #fbfcfb;
+  border: 1px solid var(--line);
+}
+
+.account-card strong,
+.session-card strong,
+.account-card span,
+.session-card span,
+.account-card small,
+.session-card small {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.account-card span,
+.session-card span,
+.account-card small,
+.session-card small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.account-card.active,
+.session-card.active {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent-dark);
+}
+
+.account-card.active span,
+.session-card.active span,
+.account-card.active small,
+.session-card.active small {
+  color: #dff7f2;
 }
 
 .hint,
@@ -419,5 +492,9 @@ th {
 @media (max-width: 720px) {
   .app-header {
     display: grid;
+  }
+
+  .tabs {
+    grid-template-columns: 1fr;
   }
 }

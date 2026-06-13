@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>关系互动分析器 V1</title>
+    <title>关系互动分析器 V2</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <header class="app-header">
       <div>
-        <h1>关系互动分析器 V1</h1>
-        <p>截图 OCR / 第三方导出文件导入，校对后生成关系互动趋势报告。</p>
+        <h1>关系互动分析器 V2</h1>
+        <p>微信本地导入 / 截图 OCR / 第三方导出文件导入，校对后生成关系互动趋势报告。</p>
       </div>
       <div class="privacy-badge">默认本地处理</div>
     </header>
@@ -20,14 +20,34 @@
         <section class="panel">
           <div class="section-title">
             <h2>导入中心</h2>
-            <span>微信优先</span>
+            <span>本地优先</span>
           </div>
           <div class="tabs" role="tablist">
-            <button class="tab active" type="button" data-tab="screenshots">截图 OCR</button>
+            <button class="tab active" type="button" data-tab="wechat">微信本地</button>
+            <button class="tab" type="button" data-tab="screenshots">截图 OCR</button>
             <button class="tab" type="button" data-tab="files">导出文件</button>
           </div>
 
-          <form id="screenshot-form" class="import-form">
+          <form id="wechat-form" class="import-form">
+            <label class="field-label">自定义微信根目录
+              <input id="wechat-root" placeholder="可选，如 ~/Library/.../xwechat_files" />
+            </label>
+            <button id="wechat-detect-button" type="button">检测微信目录</button>
+            <div id="wechat-detect-result" class="wechat-result"></div>
+            <div id="wechat-account-options" class="account-list"></div>
+            <label class="field-label">数据库密钥
+              <input id="wechat-db-key" type="password" autocomplete="off" placeholder="V2.0 手动密钥模式" />
+            </label>
+            <button id="wechat-session-button" type="button">读取会话列表</button>
+            <div id="wechat-session-options" class="session-list"></div>
+            <label class="field-label">导入条数上限
+              <input id="wechat-limit" type="number" min="1" max="50000" value="5000" />
+            </label>
+            <p class="hint">V2.0 已接通微信本地读取框架。真实 WCDB 读取需要后续 native reader；当前不会复制或捆绑 WeFlow 二进制。</p>
+            <button id="wechat-import-button" type="submit">导入选中会话</button>
+          </form>
+
+          <form id="screenshot-form" class="import-form hidden">
             <label class="file-picker">
               <input id="screenshot-files" type="file" accept=".png,.jpg,.jpeg,.webp,.heic,.tif,.tiff,image/*" multiple />
               <span id="screenshot-label">选择一张或多张聊天截图</span>

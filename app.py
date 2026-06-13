@@ -30,6 +30,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
+from wechat import collector as wechat_collector
+from wechat.detector import detect_wechat, public_detection_payload
+from wechat.normalizer import normalize_wechat_record
 
 ROOT_DIR = Path(__file__).resolve().parent
 STATIC_DIR = ROOT_DIR / "static"
@@ -42,6 +45,7 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 CURRENT_YEAR = 2026
 
 CONVERSATIONS: Dict[str, Dict[str, Any]] = {}
+WECHAT_ACCOUNTS: Dict[str, Dict[str, Any]] = {}
 
 
 @dataclass
@@ -114,6 +118,18 @@ SYSTEM_MARKERS = (
     "messages and calls are end-to-end encrypted",
 )
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".heic", ".tif", ".tiff"}
+MESSAGE_TYPES = {
+    "text",
+    "voice",
+    "image",
+    "video",
+    "emoji",
+    "file",
+    "location",
+    "system",
+    "unknown",
+    "empty",
+}
 
 
 def decode_upload(raw: bytes) -> str:
@@ -133,9 +149,17 @@ def normalize_text(value: Any) -> str:
 
 
 def parse_datetime(value: Any) -> Optional[datetime]:
+    if isinstance(value, (int, float)) and value > 0:
+        return datetime.fromtimestamp(value / 1000 if value > 10_000_000_000 else value)
     text = normalize_text(value)
     if not text:
         return None
+    if re.fullmatch(r"\d{10}(?:\.\d+)?|\d{13}", text):
+        try:
+            numeric = float(text)
+            return datetime.fromtimestamp(numeric / 1000 if numeric > 10_000_000_000 else numeric)
+        except (OSError, OverflowError, ValueError):
+            return None
     for fmt in TIME_FORMATS:
         try:
             return datetime.strptime(text, fmt)
@@ -183,6 +207,14 @@ def infer_message_type(text: str) -> str:
         return "voice"
     if compact in {"[图片]", "[图片/表情]", "[表情]", "[动画表情]"}:
         return "image"
+    if compact in {"[视频]"}:
+        return "video"
+    if compact in {"[文件]"}:
+        return "file"
+    if compact in {"[位置]"}:
+        return "location"
+    if compact in {"[系统消息]"}:
+        return "system"
     return "text"
 
 
@@ -589,6 +621,42 @@ def import_screenshots(files: List[Tuple[str, bytes]]) -> ImportResult:
         )
     finally:
         temp_dir_obj.cleanup()
+
+
+def import_wechat_records(records: List[Dict[str, Any]]) -> ImportResult:
+    messages: List[Message] = []
+    errors: List[Dict[str, Any]] = []
+    for index, record in enumerate(records, start=1):
+        if not isinstance(record, dict):
+            errors.append({"line": index, "raw": record, "reason": "微信消息不是对象"})
+            continue
+        normalized = normalize_wechat_record(record, len(messages) + 1)
+        text = normalize_text(normalized["text"])
+        if not text:
+            continue
+        message_type = normalized["message_type"]
+        if message_type not in MESSAGE_TYPES:
+            message_type = "unknown"
+        messages.append(
+            Message(
+                id=normalized["id"],
+                sender=normalize_text(normalized["sender"]) or "未知发送者",
+                sender_role=normalized["sender_role"],
+                timestamp=normalized["timestamp"],
+                text=text,
+                message_type=message_type,
+                source="wechat_local",
+                confidence=float(normalized["confidence"]),
+                needs_review=bool(normalized["needs_review"]),
+                raw=normalized["raw"],
+            )
+        )
+    return ImportResult(
+        messages,
+        errors,
+        source_type="wechat_local",
+        confidence=0.96 if messages else 0,
+    )
 
 
 def assign_self_sender(messages: List[Message], self_sender: str) -> None:
@@ -1000,8 +1068,20 @@ def conversation_payload(conversation_id: str) -> Dict[str, Any]:
     }
 
 
+def register_wechat_accounts(accounts: List[Dict[str, Any]]) -> None:
+    for account in accounts:
+        account_id = account.get("account_id")
+        path = account.get("path")
+        if account_id and path:
+            WECHAT_ACCOUNTS[account_id] = account
+
+
+def resolve_wechat_account(account_id: str) -> Optional[Dict[str, Any]]:
+    return WECHAT_ACCOUNTS.get(account_id)
+
+
 class ChatAnalyzerHandler(BaseHTTPRequestHandler):
-    server_version = "ChatAnalyzerV1/0.2"
+    server_version = "ChatAnalyzerV2/0.3"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"{self.address_string()} - {format % args}")
@@ -1038,6 +1118,9 @@ class ChatAnalyzerHandler(BaseHTTPRequestHandler):
             relative = path.removeprefix("/static/")
             self.serve_file(STATIC_DIR / relative)
             return
+        if path == "/api/wechat/detect":
+            self.handle_wechat_detect()
+            return
         if path.startswith("/api/conversations/"):
             self.handle_conversation_get(path)
             return
@@ -1053,6 +1136,15 @@ class ChatAnalyzerHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/import/screenshots":
             self.handle_screenshot_import()
+            return
+        if path == "/api/wechat/accounts":
+            self.handle_wechat_accounts()
+            return
+        if path == "/api/wechat/sessions":
+            self.handle_wechat_sessions()
+            return
+        if path == "/api/wechat/import":
+            self.handle_wechat_import()
             return
         if path.startswith("/api/conversations/") and path.endswith("/role"):
             self.handle_role_update(path)
@@ -1205,6 +1297,93 @@ class ChatAnalyzerHandler(BaseHTTPRequestHandler):
         payload = make_conversation(result, "screenshots")
         self.send_json(payload, HTTPStatus.CREATED)
 
+    def handle_wechat_detect(self) -> None:
+        detection = detect_wechat()
+        register_wechat_accounts(detection.get("accounts", []))
+        self.send_json(public_detection_payload(detection))
+
+    def handle_wechat_accounts(self) -> None:
+        try:
+            payload = self.read_json_body()
+        except ValueError as exc:
+            self.send_error_json(HTTPStatus.BAD_REQUEST, "invalid_json", str(exc))
+            return
+        root_path = normalize_text(payload.get("root_path"))
+        detection = detect_wechat(root_path or None)
+        register_wechat_accounts(detection.get("accounts", []))
+        self.send_json(public_detection_payload(detection))
+
+    def handle_wechat_sessions(self) -> None:
+        try:
+            payload = self.read_json_body()
+        except ValueError as exc:
+            self.send_error_json(HTTPStatus.BAD_REQUEST, "invalid_json", str(exc))
+            return
+
+        account = resolve_wechat_account(normalize_text(payload.get("account_id")))
+        if not account:
+            self.send_error_json(HTTPStatus.BAD_REQUEST, "unknown_wechat_account", "请先检测并选择一个微信账号目录")
+            return
+        db_key = normalize_text(payload.get("db_key"))
+        limit = self.parse_int_payload(payload.get("limit"), 200, 1, 10000)
+        try:
+            sessions = wechat_collector.list_sessions(account["path"], db_key, limit)
+        except wechat_collector.SidecarError as exc:
+            self.send_error_json(HTTPStatus(exc.status), exc.code, exc.message)
+            return
+
+        self.send_json({
+            "account_id": account["account_id"],
+            "account_name": account.get("account_name"),
+            "sessions": sessions,
+            "reader": {"mode": "manual_key_sidecar", "media_supported": False},
+        })
+
+    def handle_wechat_import(self) -> None:
+        try:
+            payload = self.read_json_body()
+        except ValueError as exc:
+            self.send_error_json(HTTPStatus.BAD_REQUEST, "invalid_json", str(exc))
+            return
+
+        account = resolve_wechat_account(normalize_text(payload.get("account_id")))
+        if not account:
+            self.send_error_json(HTTPStatus.BAD_REQUEST, "unknown_wechat_account", "请先检测并选择一个微信账号目录")
+            return
+        session_id = normalize_text(payload.get("session_id"))
+        if not session_id:
+            self.send_error_json(HTTPStatus.BAD_REQUEST, "missing_session", "请选择要导入的微信会话")
+            return
+        db_key = normalize_text(payload.get("db_key"))
+        limit = self.parse_int_payload(payload.get("limit"), 5000, 1, 50000)
+        try:
+            records = wechat_collector.export_messages(account["path"], db_key, session_id, limit)
+        except wechat_collector.SidecarError as exc:
+            self.send_error_json(HTTPStatus(exc.status), exc.code, exc.message)
+            return
+
+        result = import_wechat_records(records)
+        if not result.messages:
+            self.send_error_json(HTTPStatus.BAD_REQUEST, "no_messages", "微信会话中没有读取到可导入的消息")
+            return
+        payload = make_conversation(result, f"wechat:{session_id}")
+        messages: List[Message] = CONVERSATIONS[payload["conversation_id"]]["messages"]
+        self.send_json(
+            {
+                **payload,
+                "metrics": compute_metrics(messages),
+                "report": generate_report(messages),
+            },
+            HTTPStatus.CREATED,
+        )
+
+    def parse_int_payload(self, value: Any, default: int, minimum: int, maximum: int) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, min(maximum, parsed))
+
     def handle_role_update(self, path: str) -> None:
         conversation_id, conversation, parts = self.get_conversation_from_path(path)
         if not conversation_id or not conversation or len(parts) != 4:
@@ -1264,7 +1443,7 @@ class ChatAnalyzerHandler(BaseHTTPRequestHandler):
             if "text" in item:
                 message.text = normalize_text(item["text"])
                 message.message_type = infer_message_type(message.text)
-            if "message_type" in item and item["message_type"] in {"text", "voice", "image", "system", "empty"}:
+            if "message_type" in item and item["message_type"] in MESSAGE_TYPES:
                 message.message_type = item["message_type"]
             message.needs_review = bool(item.get("needs_review", False))
         self.send_json({**conversation_payload(conversation_id), "metrics": compute_metrics(messages), "report": generate_report(messages)})
@@ -1329,7 +1508,7 @@ class ChatAnalyzerHandler(BaseHTTPRequestHandler):
 
 def run() -> None:
     server = ThreadingHTTPServer((HOST, PORT), ChatAnalyzerHandler)
-    print(f"聊天关系分析器 V1 已启动：http://{HOST}:{PORT}")
+    print(f"聊天关系分析器 V2 已启动：http://{HOST}:{PORT}")
     print("按 Ctrl+C 停止服务。")
     try:
         server.serve_forever()
